@@ -1,0 +1,13 @@
+In the first terminal:
+ros2 launch ur_robot_driver ur_control.launch.py ur_type:=ur5e robot_ip:=yyy.yyy.yyy.yyy use_fake_hardware:=true launch_rviz:=true
+
+In the second terminal:
+ros2 launch ur_moveit_config ur_moveit.launch.py ur_type:=ur5e launch_rviz:=true
+
+In a third terminal:
+ros2 launch apple_approach cpp_arm_launch.py 
+
+In a fourth terminal:
+ros2 service call /execute_arm_trajectory apple_approach_interfaces/srv/SendTrajectory "{waypoints: [0.0, 0.5, 1.0, 1.5, 2.0, 2.5, 0.1, 0.6, 1.1, 1.6, 2.1, 2.6, 0.2, 0.7, 1.2, 1.7, 2.2, 2.7]}"
+
+ros2 service call /execute_arm_trajectory apple_approach_interfaces/srv/SendTrajectory "{waypoints: [0, -1.5708, 0, -1.5708, 0, 0, 0.25, -2.5, 0.25, -1.9, 0.25, 0.25]}"
