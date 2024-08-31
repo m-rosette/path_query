@@ -5,4 +5,3 @@ geometry_msgs/Point coordinate
 ---
 # Response
 bool success
-std_msgs/Float32MultiArray waypoints

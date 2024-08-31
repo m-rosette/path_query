@@ -15,6 +15,7 @@
 #include <fstream>
 #include <vector>
 #include <stdexcept>
+#include <cmath> // For M_PI
 
 using std::placeholders::_1;
 using std::placeholders::_2;
@@ -32,7 +33,13 @@ private:
 
     moveit::planning_interface::MoveGroupInterface move_group_;
 
-    std::vector<double> home_joint_positions; // Vector to store the first slice of the array
+    std::vector<double> home_joint_positions = {
+        M_PI / 2,
+        -M_PI / 3,
+        2 * M_PI / 3,
+        2 * M_PI / 3,
+        -M_PI / 2,
+        0};
 
     void execute_trajectory(const std::shared_ptr<apple_approach_interfaces::srv::SendTrajectory::Request> request,
                             std::shared_ptr<apple_approach_interfaces::srv::SendTrajectory::Response> response);
@@ -50,75 +57,10 @@ MoveArmNode::MoveArmNode()
     this->move_group_.setMaxAccelerationScalingFactor(1.0);
     this->move_group_.setMaxVelocityScalingFactor(1.0);
 
-    try
-    {
-        // Define the dimensions of the 3D array (should match the array in Python)
-        const int dim1 = 100, dim2 = 6, dim3 = 162;
-
-        // Load the 3D array from the file
-        auto array = read_data("/home/marcus/ros2_ws/src/apple_approach/resources/array.bin", dim1, dim2, dim3);
-
-        // Output the first slice of the loaded array
-        for (int i = 0; i < dim2; ++i)
-        {
-            home_joint_positions.push_back(array[0][i][0]);
-        }
-        // Create a string stream to log the entire home_config vector
-        std::ostringstream oss;
-        oss << "home_joint_positions = [";
-        for (size_t i = 0; i < home_joint_positions.size(); ++i)
-        {
-            oss << home_joint_positions[i];
-            if (i < home_joint_positions.size() - 1)
-            {
-                oss << ", ";
-            }
-        }
-        oss << "]";
-
-        // Log the home_config vector
-        RCLCPP_INFO(this->get_logger(), "%s", oss.str().c_str());
-    }
-    catch (const std::exception &e)
-    {
-        RCLCPP_ERROR(this->get_logger(), "Exception: %s", e.what());
-        return;
-    }
-
     // Set the arm to the home position
     set_to_home();
 
     RCLCPP_INFO(this->get_logger(), "Move arm server ready");
-}
-
-std::vector<std::vector<std::vector<double>>> MoveArmNode::read_data(const std::string &filename, int dim1, int dim2, int dim3)
-{
-    // Create a 3D vector to store the data
-    std::vector<std::vector<std::vector<double>>> array(dim1, std::vector<std::vector<double>>(dim2, std::vector<double>(dim3)));
-
-    // Open the file
-    std::ifstream file(filename, std::ios::in | std::ios::binary);
-
-    if (!file)
-    {
-        throw std::runtime_error("Failed to open the file!");
-    }
-
-    // Read the data from the file into the 3D vector
-    for (int i = 0; i < dim1; ++i)
-    {
-        for (int j = 0; j < dim2; ++j)
-        {
-            file.read(reinterpret_cast<char *>(array[i][j].data()), dim3 * sizeof(double));
-            if (!file)
-            {
-                throw std::runtime_error("Error reading from file!");
-            }
-        }
-    }
-
-    file.close();
-    return array;
 }
 
 void MoveArmNode::set_to_home()
@@ -147,6 +89,9 @@ void MoveArmNode::execute_trajectory(const std::shared_ptr<apple_approach_interf
     // Set the robot to home configuration
     set_to_home();
 
+    // Add a delay after setting to home
+    std::this_thread::sleep_for(std::chrono::milliseconds(250));
+
     // Extract the layout dimensions from the Float32MultiArray message
     const auto &layout = request->waypoints.layout;
     if (layout.dim.size() < 2)
@@ -160,7 +105,7 @@ void MoveArmNode::execute_trajectory(const std::shared_ptr<apple_approach_interf
     int num_joints = layout.dim[1].size;
 
     // Ensure the flattened data size matches the expected dimensions
-    if (request->waypoints.data.size() != num_waypoints * num_joints)
+    if (static_cast<int>(request->waypoints.data.size()) != num_waypoints * num_joints)
     {
         RCLCPP_ERROR(this->get_logger(), "Mismatch between data size and dimensions");
         response->success = false;
@@ -190,7 +135,7 @@ void MoveArmNode::execute_trajectory(const std::shared_ptr<apple_approach_interf
     point.time_from_start.nanosec = 0;
 
     double current_time = 0.0; // Start time
-    double time_step = 0.1; // Time step between waypoints
+    double time_step = 0.01;    // Time step between waypoints
 
     for (int i = 0; i < num_waypoints; ++i)
     {
@@ -212,14 +157,14 @@ void MoveArmNode::execute_trajectory(const std::shared_ptr<apple_approach_interf
         current_time += time_step; // Increment time for the next waypoint
     }
 
-        // Log trajectory points
-    for (const auto &point : joint_trajectory.points)
-    {
-        RCLCPP_INFO(this->get_logger(), "Joint positions: [%f, %f, %f, %f, %f, %f], Time from start: %d.%09d",
-                    point.positions[0], point.positions[1], point.positions[2],
-                    point.positions[3], point.positions[4], point.positions[5],
-                    point.time_from_start.sec, point.time_from_start.nanosec);
-    }
+    // // Log trajectory points
+    // for (const auto &point : joint_trajectory.points)
+    // {
+    //     RCLCPP_INFO(this->get_logger(), "Joint positions: [%f, %f, %f, %f, %f, %f], Time from start: %d.%09d",
+    //                 point.positions[0], point.positions[1], point.positions[2],
+    //                 point.positions[3], point.positions[4], point.positions[5],
+    //                 point.time_from_start.sec, point.time_from_start.nanosec);
+    // }
 
     // Convert JointTrajectory to RobotTrajectory
     moveit_msgs::msg::RobotTrajectory robot_trajectory;
