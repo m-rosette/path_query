@@ -30,19 +30,20 @@ class CoordinateToTrajectoryService(Node):
         self.timer = self.create_timer(1.0, self.publish_markers)
 
         # Define distance tolerance
-        self.distance_tol = 1.0
+        self.distance_tol = 0.5
 
         # Load voxel data
-        y_trans = 0.45
-        self.voxel_data = np.loadtxt('/home/marcus/ros2_ws/src/path_query/apple_approach/resources/voxel_data_parallelepiped_filtered.csv')
-        self.paths = np.load('/home/marcus/ros2_ws/src/path_query/apple_approach/resources/voxel_paths_parallelepiped.npy')
+        y_trans = 0
+        self.voxel_data = np.loadtxt('/home/marcus/ros2_ws/src/path_query/apple_approach/resources/task_space_filtered_voxels_centers.csv')
+        self.paths = np.load('/home/marcus/ros2_ws/src/path_query/apple_approach/resources/task_space_linear_interp_paths.npy')
+
         self.load_voxel_data(y_trans)
 
         self.get_logger().info('Coordinate to trajectory service up and running')
 
     def load_voxel_data(self, y_translation):
         self.voxel_centers = self.voxel_data[:, :3]
-        self.voxel_indices = self.voxel_data[:, 3:]
+        # self.voxel_indices = self.voxel_data[:, 3:]
 
         # Translate voxels in front of robot
         voxel_centers_shifted = np.copy(self.voxel_centers)
@@ -166,6 +167,9 @@ class CoordinateToTrajectoryService(Node):
         closest_voxel_index = np.argmin(distances)
 
         distance_error = distances[closest_voxel_index]
+
+        # for i, path in enumerate(self.paths):
+        #     self.get_logger().info(f"Waypoint: {self.paths[i, :, closest_voxel_index]}")
 
         # Get the associated path to closest voxel
         return self.paths[:, :, closest_voxel_index], distance_error

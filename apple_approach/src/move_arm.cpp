@@ -33,12 +33,19 @@ private:
 
     moveit::planning_interface::MoveGroupInterface move_group_;
 
+    // std::vector<double> home_joint_positions = {
+    //     M_PI / 2,
+    //     -M_PI / 3,
+    //     2 * M_PI / 3,
+    //     2 * M_PI / 3,
+    //     -M_PI / 2,
+    //     0};
     std::vector<double> home_joint_positions = {
-        M_PI / 2,
-        -M_PI / 3,
-        2 * M_PI / 3,
-        2 * M_PI / 3,
+        0,
         -M_PI / 2,
+        0,
+        -M_PI / 2,
+        0,
         0};
 
     void execute_trajectory(const std::shared_ptr<apple_approach_interfaces::srv::SendTrajectory::Request> request,
@@ -54,8 +61,8 @@ MoveArmNode::MoveArmNode()
         "execute_arm_trajectory", std::bind(&MoveArmNode::execute_trajectory, this, _1, _2));
 
     // Set velocity and acceleration limits
-    this->move_group_.setMaxAccelerationScalingFactor(1.0);
-    this->move_group_.setMaxVelocityScalingFactor(1.0);
+    this->move_group_.setMaxAccelerationScalingFactor(0.1);
+    this->move_group_.setMaxVelocityScalingFactor(0.1);
 
     // Set the arm to the home position
     set_to_home();
@@ -125,6 +132,21 @@ void MoveArmNode::execute_trajectory(const std::shared_ptr<apple_approach_interf
         }
     }
 
+    for (int row = 0; row < num_waypoints; ++row)
+    {
+        std::stringstream ss;
+        ss << "Waypoint " << row << ": ";
+        for (int col = 0; col < num_joints; ++col)
+        {
+            ss << path[row][col];
+            if (col < num_joints - 1)
+            {
+                ss << ", ";
+            }
+        }
+        RCLCPP_INFO(this->get_logger(), ss.str().c_str());
+    }
+
     // Prepare the JointTrajectory message
     trajectory_msgs::msg::JointTrajectory joint_trajectory;
     joint_trajectory.header.frame_id = move_group_.getPlanningFrame();
@@ -135,7 +157,7 @@ void MoveArmNode::execute_trajectory(const std::shared_ptr<apple_approach_interf
     point.time_from_start.nanosec = 0;
 
     double current_time = 0.0; // Start time
-    double time_step = 0.01;    // Time step between waypoints
+    double time_step = 0.02;    // Time step between waypoints
 
     for (int i = 0; i < num_waypoints; ++i)
     {
