@@ -61,8 +61,9 @@ MoveArmNode::MoveArmNode()
         "execute_arm_trajectory", std::bind(&MoveArmNode::execute_trajectory, this, _1, _2));
 
     // Set velocity and acceleration limits
-    this->move_group_.setMaxAccelerationScalingFactor(0.1);
-    this->move_group_.setMaxVelocityScalingFactor(0.1);
+    // NEED TO RESET TO 0.1 FOR HARDWARE!!!
+    this->move_group_.setMaxAccelerationScalingFactor(1);
+    this->move_group_.setMaxVelocityScalingFactor(1);
 
     // Set the arm to the home position
     set_to_home();

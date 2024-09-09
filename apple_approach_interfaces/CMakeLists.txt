@@ -16,6 +16,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "srv/MoveArm.srv"
   "srv/SendTrajectory.srv"
   "srv/CoordinateToTrajectory.srv"
+  "srv/VoxelMask.srv"
   # "srv/StartSequence.srv"
   "srv/MoveToNamedTarget.srv"
   # "srv/LocalPlannerSequence.srv"

@@ -1,16 +1,19 @@
 #!/usr/bin/env python3
 
 import numpy as np
+import os
+import json
 
 import rclpy
 import rclpy.logging
 from rclpy.node import Node
 from rclpy.executors import SingleThreadedExecutor
+from ament_index_python.packages import get_package_share_directory
 
 from geometry_msgs.msg import Point
 from visualization_msgs.msg import Marker, MarkerArray
 from std_msgs.msg import Float32MultiArray, MultiArrayDimension
-from apple_approach_interfaces.srv import CoordinateToTrajectory, SendTrajectory
+from apple_approach_interfaces.srv import CoordinateToTrajectory, SendTrajectory, VoxelMask
 
 
 class CoordinateToTrajectoryService(Node):
@@ -18,7 +21,8 @@ class CoordinateToTrajectoryService(Node):
         super().__init__('voxel_search_service')
         
         # Create the service
-        self.srv = self.create_service(CoordinateToTrajectory, 'coordinate_to_trajectory', self.coord_to_traj_callback)
+        self.coord_to_traj_srv = self.create_service(CoordinateToTrajectory, 'coordinate_to_trajectory', self.coord_to_traj_callback)
+        self.voxel_mask = self.create_service(VoxelMask, 'voxel_mask', self.voxel_mask_callback)
 
         # Create the service client
         self.client = self.create_client(SendTrajectory, 'execute_arm_trajectory')
@@ -29,13 +33,21 @@ class CoordinateToTrajectoryService(Node):
         # Set the timer to publish markers periodically
         self.timer = self.create_timer(1.0, self.publish_markers)
 
-        # Define distance tolerance
+        # Get the package share directory
+        package_share_directory = get_package_share_directory('apple_approach')
+
+        # Retrieve precomputed tree locations
+        tree_wire_filter_file = os.path.join(package_share_directory, 'resources', 'tree_wire_mask.json')
+        self.load_tree_wire_filter_ranges(tree_wire_filter_file)
+
+        # Define maximum distance tolerance between target location and precomputed voxel
         self.distance_tol = 0.5
 
         # Load voxel data
         y_trans = 0
         self.voxel_data = np.loadtxt('/home/marcus/ros2_ws/src/path_query/apple_approach/resources/task_space_filtered_voxels_centers.csv')
         self.paths = np.load('/home/marcus/ros2_ws/src/path_query/apple_approach/resources/task_space_linear_interp_paths.npy')
+        self.paths_orig = np.copy(self.paths)
 
         self.load_voxel_data(y_trans)
 
@@ -49,8 +61,30 @@ class CoordinateToTrajectoryService(Node):
         voxel_centers_shifted = np.copy(self.voxel_centers)
         voxel_centers_shifted[:, 1] += y_translation
         self.voxel_centers = voxel_centers_shifted
+        self.voxel_centers_orig = np.copy(self.voxel_centers)
+
+    def load_tree_wire_filter_ranges(self, filename):
+        # Load JSON data from the file
+        with open(filename, 'r') as file:
+            data = json.load(file)
+
+        # Extract the min and max pairs from the data
+        x_filter_ranges = np.array([(entry['min'], entry['max']) for entry in data['tree_x_coordinate_ranges']])
+
+        # Add an empty list x-ranges to act as "no filter needed" or "no tree"
+        self.x_filter_ranges = np.insert(x_filter_ranges, 0, [None, None]).reshape(6, 2)
+        
+        self.z_filter_ranges = np.array([(entry['min'], entry['max']) for entry in data['z_wire_heights']])
 
     def publish_markers(self):
+        # apple_loc = [[0.3, 0.4, 0.4], [0.2, 0.2, 0.8], [0.0, 0.3, 0.8], [-0.2, 0.3, 1.0], [0.3, 0.2, 1.2], [-0.2, 0.3, 0.5]]
+        apple_loc = [[-0.2, 0.3, 0.5], [0, 0.3, 0.6], [0.2, 0.4, 0.7], [0.05, 0.3, 0.8], [0, 0.4, 0.9], [-0.1, 0.3, 0.9]]
+
+        apple_voxel_idxs = []
+        for i, apple_pos in enumerate(apple_loc):
+            _, _, closest_voxel_idx = self.path_to_closest_voxel(apple_pos)
+            apple_voxel_idxs.append(closest_voxel_idx)
+
         marker_array = MarkerArray()
 
         for i, center in enumerate(self.voxel_centers):
@@ -59,7 +93,6 @@ class CoordinateToTrajectoryService(Node):
             marker.header.stamp = self.get_clock().now().to_msg()
             marker.ns = 'voxel'
             marker.id = i
-            marker.type = Marker.SPHERE
             marker.action = Marker.ADD
             
             # Create and set the Point object
@@ -69,14 +102,27 @@ class CoordinateToTrajectoryService(Node):
             point.z = center[2]
             marker.pose.position = point
             
-            marker.pose.orientation.w = 1.0
-            marker.scale.x = 0.1  # Radius of the sphere
-            marker.scale.y = 0.1
-            marker.scale.z = 0.1
-            marker.color.r = 1.0  # Red color
-            marker.color.g = 0.0
-            marker.color.b = 0.0
-            marker.color.a = 1.0  # Fully opaque
+            if i in apple_voxel_idxs:
+                marker.type = Marker.SPHERE
+                marker.pose.orientation.w = 1.0
+                marker.scale.x = 0.1  # Radius of the sphere
+                marker.scale.y = 0.1
+                marker.scale.z = 0.1
+                marker.color.r = 1.0  # Red color 
+                marker.color.g = 0.0
+                marker.color.b = 0.0
+                marker.color.a = 1.0  # Fully opaque
+
+            else:
+                marker.type = Marker.CUBE
+                marker.pose.orientation.w = 1.0
+                marker.scale.x = 0.09  # Size of the cube
+                marker.scale.y = 0.09
+                marker.scale.z = 0.09
+                marker.color.r = 0.0 
+                marker.color.g = 0.0
+                marker.color.b = 1.0  # Blue color
+                marker.color.a = 0.6  # Fully opaque
 
             marker_array.markers.append(marker)
 
@@ -91,7 +137,7 @@ class CoordinateToTrajectoryService(Node):
         point = np.array([x, y, z])
 
         # Find the closest path associated with the target point
-        path, distance_to_voxel = self.path_to_closest_voxel(point)
+        path, distance_to_voxel, closest_voxel_index = self.path_to_closest_voxel(point)
         self.get_logger().info(f'Distance to nearest voxel: {distance_to_voxel}')
 
         if distance_to_voxel > self.distance_tol:
@@ -150,6 +196,67 @@ class CoordinateToTrajectoryService(Node):
         # Reset state after the service call
         self.waypoint_msg = None
 
+    def voxel_mask_callback(self, request, response):
+        tree_pos = request.tree_pos
+        self.get_logger().info(f'Received voxel mask request: {tree_pos}')
+        
+        # Reset voxel centers and paths to the originals
+        voxel_centers_copy = np.copy(self.voxel_centers_orig)
+        self.paths = np.copy(self.paths_orig)
+
+        if tree_pos not in range(len(self.x_filter_ranges)):
+            self.get_logger().warn('Voxel mask positions out of range')
+            self.get_logger().info('Resetting to unfiltered voxels...')
+            self.voxel_centers = voxel_centers_copy
+
+        # No tree in range (just wires)
+        elif tree_pos == 0:
+            self.get_logger().info('Voxel mask set to just wire locations')
+
+            # Get a mask of the z coords
+            combined_z_mask = self.mask_z(voxel_centers_copy)
+
+            # Apply the combined mask to filter out coordinates and paths
+            self.voxel_centers = voxel_centers_copy[combined_z_mask]
+            self.paths = self.paths[:, :, combined_z_mask]
+
+        # Set the mask of the tree pos and wires
+        elif tree_pos in range(len(self.x_filter_ranges)):
+            self.get_logger().info(f'Voxel mask set to tree position {tree_pos} and wire locations')
+
+            # Retrieve x-ranges
+            min_x, max_x = self.x_filter_ranges[tree_pos]
+
+            # Create a mask where x-values are *not* between the x-ranges and z-ranges
+            x_mask = (voxel_centers_copy[:, 0] < min_x) | (voxel_centers_copy[:, 0] > max_x)
+
+            # Get a mask of the z coords
+            combined_z_mask = self.mask_z(voxel_centers_copy)
+
+            # Combine the x mask with the z mask
+            combined_mask = x_mask & combined_z_mask
+
+            # Apply the combined mask to filter out coordinates and paths
+            self.voxel_centers = voxel_centers_copy[combined_mask]
+            self.paths = self.paths[:, :, combined_mask]
+
+        self.get_logger().info(f'Length of voxel centers list: {len(self.voxel_centers)}')
+
+        response.success = True 
+
+        return response
+    
+    def mask_z(self, voxel_coords):
+        # Initialize combined_z_mask to all True
+        combined_z_mask = np.ones(voxel_coords.shape[0], dtype=bool)
+
+        # Loop through each z range and update the combined_z_mask
+        for z_min, z_max in self.z_filter_ranges:
+            z_mask = (voxel_coords[:, 2] < z_min) | (voxel_coords[:, 2] > z_max)
+            combined_z_mask &= z_mask
+        
+        return combined_z_mask
+
     def path_to_closest_voxel(self, target_point):
         """ Find the path to a voxel that the target point is closest to 
 
@@ -168,11 +275,8 @@ class CoordinateToTrajectoryService(Node):
 
         distance_error = distances[closest_voxel_index]
 
-        # for i, path in enumerate(self.paths):
-        #     self.get_logger().info(f"Waypoint: {self.paths[i, :, closest_voxel_index]}")
-
         # Get the associated path to closest voxel
-        return self.paths[:, :, closest_voxel_index], distance_error
+        return self.paths[:, :, closest_voxel_index], distance_error, closest_voxel_index
         
 
 def main():

@@ -55,10 +55,9 @@ install(DIRECTORY
   launch
   DESTINATION share/${PROJECT_NAME}/
 )
-# Install launch files.
-install(DIRECTORY
-  resources
-  DESTINATION share/${PROJECT_NAME}/
+# Install resources files.
+install(DIRECTORY resources/
+  DESTINATION share/${PROJECT_NAME}/resources
 )
 
 if(BUILD_TESTING)
